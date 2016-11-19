@@ -1,7 +1,17 @@
 # DbHelper
-一个比Apache-commons-dbutils更加好用，更加简洁轻便的微型框架
+一个比Apache-commons-dbutils更加好用，更加简洁轻便的微型框架。最新版本为dbhelper-0.1.0。
 ![镇楼图](http://img.blog.csdn.net/20160719164640373)
 ---
+
+
+## 核心理念
+
+本工具以查询为主要核心理念，即query操作为主，覆盖了多种查询方式的自动化运行流程。
+其他诸如insert, update, delete以及事务操作，均由QueryRunner的update方法完成。
+
+配备了自定义大小的数据库连接池，提升程序运行的效率，并由底层自动维护连接池的释放，申请问题。省心。
+
+
 
 ## 如何使用
 
@@ -15,6 +25,7 @@
 		<url>jdbc:mysql://localhost:3306/fams</url>
 		<user>root</user>
 		<password>mysql</password>
+		<poolsize>20</poolsize>
 	</database>
 	···
 </project>
@@ -27,7 +38,7 @@
 
 - Step 3：
 	主要的业务逻辑操作类`QueryRunner`，封装了对数据库JDBC操作的增删改查等一系列的操作。
-	对于update方法的JDBC操作，我们无需手动的关闭数据库连接，仅仅简单的通过DbHelper的重载的release方法来实现对数据库连接对象，查询语句以及数据集的关闭操作。是不是感觉很省心啊。
+	对于update方法的JDBC操作，我们无需手动的关闭数据库连接，仅仅简单的通过DbHelper的重载的release方法来实现对数据库连接对象，查询语句以及数据集的关闭操作,自动的维护数据库连接池。是不是感觉很省心啊。
 
 
 ---
@@ -37,13 +48,13 @@
 这里先根据数据库中的表结构来创建一个对应的Bean对象吧。
 ```
 /**
- * @Date 2016年7月19日
+ * @Date 2016年11月19日
  *
  * @author Administrator
  */
 
 /**
- * @author 郭瑞彪
+ * @author 郭璞
  *
  */
 public class DateTest {
@@ -86,112 +97,282 @@ public class DateTest {
 
 ```
 
-然后是测试代码：
+
+
+## 数据库内详细数据信息
 
 ```
+mysql> use test;
+Database changed
+mysql> select * from datetest;
++----+----------+------------+
+| id | name     | date       |
++----+----------+------------+
+|  1 | dlut     | 2016-07-06 |
+|  2 | 清华大学 | 2016-07-03 |
+|  3 | 北京大学 | 2016-07-28 |
+|  4 | Mark     | 2016-08-20 |
+|  5 | Tom      | 2016-08-19 |
+|  6 | Jane     | 2016-08-21 |
++----+----------+------------+
+6 rows in set (0.00 sec)
+
+mysql>
+
+```
+
+## 测试代码
+
+### 数据库连接池测试
+
+```
+public static void main(String[] args) throws Exception {
+		DbHelper helper = new DbHelper();
+		helper.register();
+		System.out.println(helper.connpool.size());
+		Connection conn = helper.getConnection();
+		System.out.println(helper.connpool.size());
+		Connection conn1 = helper.getConnection();
+		System.out.println(helper.connpool.size());
+		Connection conn2 = helper.getConnection();
+		System.out.println(helper.connpool.size());
+
+		System.out.println(conn.toString());
+		System.out.println(conn1.toString());
+		System.out.println(conn2.toString());
+
+		helper.release(conn);
+		System.out.println(helper.connpool.size());
+
+		PreparedStatement stmt = conn1.prepareStatement("select * from user");
+		helper.release(conn2, stmt);
+		System.out.println(helper.connpool.size());
+
+		PreparedStatement stmt1 = conn1.prepareStatement("select * from user");
+		ResultSet rs = stmt1.executeQuery();
+		helper.release(conn2, stmt1, rs);
+		System.out.println(helper.connpool.size());
+
+		System.out.println(conn.toString());
+		System.out.println(conn1.toString());
+		System.out.println(conn2.toString());
+	}
+
+```
+
+测试结果：
+
+```
+20
+19
+18
+17
+dbhelper.DbHelper$MyConnection@28c97a5
+dbhelper.DbHelper$MyConnection@6659c656
+dbhelper.DbHelper$MyConnection@6d5380c2
+18
+19
+20
+dbhelper.DbHelper$MyConnection@28c97a5
+dbhelper.DbHelper$MyConnection@6659c656
+dbhelper.DbHelper$MyConnection@6d5380c2
+
+
+```
+
+
+### 测试集
+
+```
+/**
+ * @Date 2016年11月19日
+ *
+ * @author 郭  璞
+ *
+ */
+package mp;
 
 import java.sql.Connection;
 import java.util.List;
 
+import org.junit.Test;
+
 import dbhelper.DbHelper;
 import dbhelper.QueryRunner;
+import handlers.BeanHandler;
 import handlers.BeanListHandler;
 
 /**
- * @Date 2016年7月19日
+ * @author 郭  璞
  *
- * @author Administrator
  */
+public class TestCase {
+	
+	@Test
+	public void testSingleBean() throws Exception {
+		System.out.println("-----------------testSingleBean-------------------------------------");
+		String sql = "select * from datetest where id=?";
+		QueryRunner runner = new QueryRunner();
+		DbHelper.register();
 
-/**
- * @author 郭瑞彪
- *
- */
-public class Main {
-	public static void main(String[] args) throws Exception {
+		DbHelper helper = new DbHelper();
+		Connection conn = helper.getConnection();
+		DateTest datetest = runner.query(conn, sql, new BeanHandler<DateTest>(DateTest.class), 1);
+		
+		System.out.println(datetest.toString());
+		
+		DbHelper.release(conn);
+	}
+	
+	
+	@Test
+	public void testBeanList() throws Exception {
+		System.out.println("-------------- testBeanList----------------------------------------");
 		String sql = "select * from datetest";
 		QueryRunner runner = new QueryRunner();
 		DbHelper.register();
-		Connection conn = DbHelper.getConn();
+
+		DbHelper helper = new DbHelper();
+		Connection conn = helper.getConnection();
 		List<DateTest> dates = runner.query(conn, sql, new BeanListHandler<DateTest>(DateTest.class));
 		for (DateTest date : dates) {
 			System.out.println(date.toString());
 		}
-		System.out.println("------------------------------------------------------");
+		
+		DbHelper.release(conn);
+	}
+	
+	@Test
+	public void testBeanListWithParams1() throws Exception {
+		System.out.println("--------------testBeanListWithParams1----------------------------------------");
+		String sql = "select * from datetest where id in (?, ?, ?)";
+		QueryRunner runner = new QueryRunner();
+		DbHelper.register();
+
+		DbHelper helper = new DbHelper();
+		Connection conn = helper.getConnection();
+		Object[] params = new Object[]{1, 3, 6};
+		List<DateTest> dates = runner.query(conn, sql, new BeanListHandler<DateTest>(DateTest.class), params);
+		for (DateTest date : dates) {
+			System.out.println(date.toString());
+		}
+		
+		DbHelper.release(conn);
+	}
+
+	@Test
+	public void testBeanListWithParams2() throws Exception {
+		System.out.println("--------------testBeanListWithParams2----------------------------------------");
+		String sql = "select * from datetest where id in (?, ?, ?) or name = ?";
+		QueryRunner runner = new QueryRunner();
+		DbHelper.register();
+
+		DbHelper helper = new DbHelper();
+		Connection conn = helper.getConnection();
+		Object[] params = new Object[]{1, 3, 6, "Mark"};
+		List<DateTest> dates = runner.query(conn, sql, new BeanListHandler<DateTest>(DateTest.class), params);
+		for (DateTest date : dates) {
+			System.out.println(date.toString());
+		}
+		
+		DbHelper.release(conn);
+	}
+	
+	
+	@Test
+	public void testupdate() throws Exception {
+		System.out.println("--------------testupdate----------------------------------------");
+		String sql = "update datetest set name=? where name=?";
+		QueryRunner runner = new QueryRunner();
+		DbHelper.register();
+
+		DbHelper helper = new DbHelper();
+		Connection conn = helper.getConnection();
+		Object[] params = new Object[]{"郭璞", "Mark"};
+		
+		runner.update(conn, sql, params);
+		
+		DbHelper.release(conn);
 	}
 }
 
+
 ```
 
-结果如下：
+测试结果：
+
 ```
+-----------------testSingleBean-------------------------------------
+DateTest [id=1, name=dlut, date=Wed Jul 06 00:00:00 CST 2016]
+
+
+-------------- testBeanList----------------------------------------
 DateTest [id=1, name=dlut, date=Wed Jul 06 00:00:00 CST 2016]
 DateTest [id=2, name=清华大学, date=Sun Jul 03 00:00:00 CST 2016]
 DateTest [id=3, name=北京大学, date=Thu Jul 28 00:00:00 CST 2016]
-------------------------------------------------------
-```
+DateTest [id=4, name=郭璞, date=Sat Aug 20 00:00:00 CST 2016]
+DateTest [id=5, name=Tom, date=Fri Aug 19 00:00:00 CST 2016]
+DateTest [id=6, name=Jane, date=Sun Aug 21 00:00:00 CST 2016]
 
-通用的使用方式大致如下
 
-> 本人在@BeforeClass 方法里面已经声明过DbHelper.register();   如果您的测试代码里面没有这个语句，就会报：未注册数据源的错误啦。请注意哦。
 
- 获取集合形式的封装结果集
-```
-// 对于无参的查询封装操作
-@Test
-public void test() throws Exeption {
-	Connection conn = DbHelper.getConn();
-	String sql = "select * from yourtablename";
-	QueryRunner runner = new QUeryRunner();
-	List<YourBean> yourbaen =  (List<YourBean>) runner.query(conn,sql,new BeanListHandler<YourBean>(YourBean.class));
-	System.out.println(yourbean.toString());
-	// 可以手动的进行数据库连接对象的关闭操作
-	DbHelper.release(conn);
-}
+--------------testBeanListWithParams1----------------------------------------
+DateTest [id=1, name=dlut, date=Wed Jul 06 00:00:00 CST 2016]
+DateTest [id=3, name=北京大学, date=Thu Jul 28 00:00:00 CST 2016]
+DateTest [id=6, name=Jane, date=Sun Aug 21 00:00:00 CST 2016]
 
-```
-使用不定参数的查询语句，返回ResultSet的对应的JavaBean对象的实例
 
-```
-@Test
-public void test1() throws Exception {
-	Connection conn = DbHelper.getConn();
-	String sql = "select * from youtablename where columnname=?";
-	Object[] params = {'admin'};
-	QueryRunner runner = new QueryRuner();
-	YourBean yourbean = runner.query(conn,sql, new BeanHandler<YourBean>(YourBean.class),params);
-	DbHelper.release(conn);
-	System.out.println(yourbean.toString());
-}
-```
 
-使用不定参数的演示实例
-```
-@Test
-public void test2() throws Exception {
-	Connection conn = DbHelper.getConn();
-	String sql = "select ? from yourtablename  where id=?";
-	Object[] params = {"admin",2};
-	QueryRunner runner = new QueryRunner();
-	YourBean yourbean = runner.query(conn,sql,new BeanHandler<YourBean>(YourBean.class),params);
-	System.out.println(yourbean.toString());
-	DbHelper.release(conn);
-}
-```
+--------------testBeanListWithParams2----------------------------------------
+DateTest [id=1, name=dlut, date=Wed Jul 06 00:00:00 CST 2016]
+DateTest [id=3, name=北京大学, date=Thu Jul 28 00:00:00 CST 2016]
+DateTest [id=6, name=Jane, date=Sun Aug 21 00:00:00 CST 2016]
 
-  更新Update方式
-```
-@Test
-public void test3() throws Exception {
-	Connection conn = DbHelper.getConn();
-	String sql = "update yourtablename set columnname=? where columnname=?";
-	Object[] params = {"admin","anothervalue"};
-	QueryRunner runner = new QueryRunner();
-	runner.update(conn,sql,params);
-	System.out.println("Update database success!");
-}
+
+
+
+--------------testupdate----------------------------------------
+
+
+
 
 ```
+
+数据库中对应更新结果：
+
+```
+mysql> use test;
+Database changed
+mysql> select * from datetest;
++----+----------+------------+
+| id | name     | date       |
++----+----------+------------+
+|  1 | dlut     | 2016-07-06 |
+|  2 | 清华大学 | 2016-07-03 |
+|  3 | 北京大学 | 2016-07-28 |
+|  4 | Mark     | 2016-08-20 |
+|  5 | Tom      | 2016-08-19 |
+|  6 | Jane     | 2016-08-21 |
++----+----------+------------+
+6 rows in set (0.00 sec)
+
+mysql> select * from datetest;
++----+----------+------------+
+| id | name     | date       |
++----+----------+------------+
+|  1 | dlut     | 2016-07-06 |
+|  2 | 清华大学 | 2016-07-03 |
+|  3 | 北京大学 | 2016-07-28 |
+|  4 | 郭璞     | 2016-08-20 |
+|  5 | Tom      | 2016-08-19 |
+|  6 | Jane     | 2016-08-21 |
++----+----------+------------+
+6 rows in set (0.00 sec)
+
+```
+
+
+
 
 ## 延伸
 
@@ -201,4 +382,8 @@ public void test3() throws Exception {
 
 ## 快速应用
 
-不妨参照下面的这篇文章，相信会给您些许灵感。http://blog.csdn.net/marksinoberg/article/details/53163704
+不妨参照下面的这篇文章，相信会给您些许灵感。 
+
+
+
+------
